@@ -9,9 +9,57 @@ import 'search_app_bar_view.dart';
 import 'home_provider.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:scrollview_observer/scrollview_observer.dart';
+import '../../widgets/sliver.dart';
 
-class HomePage extends StatelessWidget {
+class HomePage extends StatefulWidget {
   const HomePage({super.key});
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
+  // 滚动控制器
+  final ScrollController outerScrollController = ScrollController();
+  late SliverObserverController observerController;
+
+  // 用于NestedScrollView的工具类
+  final nestedScrollUtil = NestedScrollUtil();
+
+  // 全局Key
+  GlobalKey nestedScrollViewKey = GlobalKey();
+  GlobalKey appBarKey = GlobalKey();
+  GlobalKey tabBarKey = GlobalKey();
+
+  // TabController
+  late TabController tabController;
+
+  // 上下文引用
+  BuildContext? _sliverHeaderCtx;
+  BuildContext? _sliverBodyCtx;
+
+  @override
+  void initState() {
+    super.initState();
+
+    // 初始化TabController
+    tabController = TabController(length: 6, vsync: this);
+
+    // 初始化观察者控制器
+    observerController = SliverObserverController(
+      controller: outerScrollController,
+    );
+
+    // 设置外部滚动控制器
+    nestedScrollUtil.outerScrollController = outerScrollController;
+  }
+
+  @override
+  void dispose() {
+    outerScrollController.dispose();
+    tabController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -21,83 +69,160 @@ class HomePage extends StatelessWidget {
     );
   }
 
-  //使用 Column，直接嵌套 CustomScrollView 是不行的，因为：
-  // CustomScrollView 是一个可滚动区域。
-  // Column 不允许其子项无限高或具有滚动行为
+  //使用 NestedScrollView 实现吸顶效果
   Widget _buildPage(BuildContext context) {
     final provider = context.read<HomeProvider>();
 
-    ///SliverToBoxAdapter	将普通 widget（如 Column, Container,
-    /// Stack 等）适配成 sliver 形式，使其能在 CustomScrollView 中显示
-    ///
-    ///SliverList / SliverGrid	构建可滚动的列表或网格
-    ///
-    ///CustomScrollView	可以组合多个 sliver，实现复杂的滚动交互，
-    ///例如折叠 AppBar、吸顶 Tab 等
-    return CustomScrollView(
-      slivers: [
-        // 第一个 Sliver：SearchAppBar
-        const SliverToBoxAdapter(
-          child: SearchAppBar(), // 普通 widget 必须包裹在 SliverToBoxAdapter 中
-        ),
-        // 第二个 Sliver：Stack 布局
-        SliverToBoxAdapter(
-          child: Stack(
-            children: [
-              Image.asset("assets/images/banner_oval.png"),
-              Column(
-                mainAxisAlignment: MainAxisAlignment.start,
-                children: [
-                  CusTabBarView(
-                    onIndexChanged: (index) {
-                      print("Tab changed to: $index");
-                    },
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: SizedBox(
-                      height: 150,
-                      child: Swiper(
-                        itemBuilder: (BuildContext context, int index) {
-                          return ComImage(
-                            "https://img.zcool.cn/community/01b72057a7e0790000018c1bf4fce0.png",
-                          );
-                        },
-                        itemCount: 3,
-                        pagination: const SwiperPagination(),
+    return SliverViewObserver(
+      controller: observerController,
+      child: _buildNestedScrollView(),
+      sliverContexts: () {
+        return [
+          if (_sliverHeaderCtx != null) _sliverHeaderCtx!,
+          if (_sliverBodyCtx != null) _sliverBodyCtx!,
+        ];
+      },
+      customOverlap: (sliverContext) {
+        return nestedScrollUtil.calcOverlap(
+          nestedScrollViewKey: nestedScrollViewKey,
+          sliverContext: sliverContext,
+        );
+      },
+      onObserveAll: (result) {
+        result.forEach((key, value) {
+          if (key == _sliverHeaderCtx) {
+            debugPrint("SliverHeaderCtx: ${value.displayingChildIndexList}");
+          } else if (key == _sliverBodyCtx) {
+            debugPrint("SliverBodyCtx: ${value.displayingChildIndexList}");
+          }
+        });
+      },
+    );
+  }
+
+  Widget _buildNestedScrollView() {
+    return NestedScrollView(
+      key: nestedScrollViewKey,
+      controller: outerScrollController,
+      headerSliverBuilder: (context, innerBoxIsScrolled) {
+        return [
+          // 搜索栏
+          SliverAppBar(
+            key: appBarKey,
+            toolbarHeight: 44,
+            pinned: true,
+            floating: false,
+            backgroundColor: const Color(0xFFFCAAAF),
+            flexibleSpace: const SearchAppBar(),
+          ),
+
+          // 吸顶的Tab栏
+          SliverPersistentHeader(
+            key: tabBarKey,
+            pinned: true,
+            delegate: SliverHeaderDelegate.fixedHeight(
+              height: 30,
+              child: Container(
+                color: const Color(0xFFFCAAAF),
+                child: CusTabBarView(
+                  onIndexChanged: (index) {
+                    print("Tab changed to: $index");
+                  },
+                ),
+              ),
+            ),
+          ),
+        ];
+      },
+      body: Builder(
+        builder: (context) {
+          // 获取内部滚动控制器
+          final innerScrollController = PrimaryScrollController.of(context);
+          if (nestedScrollUtil.bodyScrollController != innerScrollController) {
+            nestedScrollUtil.bodyScrollController = innerScrollController;
+          }
+
+          return CustomScrollView(
+            slivers: [
+              Builder(
+                builder: (ctx) {
+                  if (_sliverBodyCtx != ctx) {
+                    _sliverBodyCtx = ctx;
+                    nestedScrollUtil.bodySliverContexts.add(ctx);
+                  }
+                  return SliverToBoxAdapter(child: Container());
+                },
+              ),
+              // 轮播图
+              SliverToBoxAdapter(
+                child: Stack(
+                  children: [
+                    //希望 SizedBox 根据父容器大小按比例调整尺寸，可以考虑使用 FractionallySizedBox。
+                    FractionallySizedBox(
+                      widthFactor: 1.0, // 宽度因子为1表示占满父容器的宽度
+                      child: SizedBox(
+                        height: 160.0,
+                        child: Image.asset(
+                          "assets/images/banner_oval.png",
+                          fit: BoxFit.fitWidth,
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                    Column(
+                      mainAxisAlignment: MainAxisAlignment.start,
+                      children: [
+                        SizedBox(height: 10),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
+                          child: SizedBox(
+                            height: 166,
+                            child: Swiper(
+                              itemBuilder: (BuildContext context, int index) {
+                                return ComImage(
+                                  "https://img.zcool.cn/community/01b72057a7e0790000018c1bf4fce0.png",
+                                );
+                              },
+                              itemCount: 3,
+                              pagination: const SwiperPagination(),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
+              // 第三个 Sliver：分类区块
+              SliverToBoxAdapter(child: _buildCategoryGrid()),
+              // 第四个 Sliver：今日特惠/新品
+              SliverToBoxAdapter(child: _buildSpecialOffers()),
+              // 第五个 Sliver：超值精选/品质精选
+              SliverToBoxAdapter(child: _buildSelection()),
+              // 第六个 Sliver：热卖排行榜
+              SliverToBoxAdapter(child: _buildHotRank()),
+              // 第七个 Sliver：限时抢购
+              SliverToBoxAdapter(child: _buildFlashSale()),
+              // 第八个 Sliver：一元秒杀
+              SliverToBoxAdapter(child: _buildOneYuanSeckill()),
+              // 第八个 Sliver：品牌专区
+              SliverToBoxAdapter(child: _buildBrandSection()),
+              // 第九个 Sliver：团购专区
+              SliverToBoxAdapter(child: _buildGroupBuy()),
+              // 添加商品展示区
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Text(
+                    '精心为你推荐',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+              _buildProductGridView(context),
             ],
-          ),
-        ),
-        // 第三个 Sliver：分类区块
-        SliverToBoxAdapter(child: _buildCategoryGrid()),
-        // 第四个 Sliver：今日特惠/新品
-        SliverToBoxAdapter(child: _buildSpecialOffers()),
-        // 第五个 Sliver：超值精选/品质精选
-        SliverToBoxAdapter(child: _buildSelection()),
-        // 第六个 Sliver：热卖排行榜
-        SliverToBoxAdapter(child: _buildHotRank()),
-        // 第七个 Sliver：限时抢购
-        SliverToBoxAdapter(child: _buildFlashSale()),
-        // 第八个 Sliver：一元秒杀
-        SliverToBoxAdapter(child: _buildOneYuanSeckill()),
-        // 第八个 Sliver：品牌专区
-        SliverToBoxAdapter(child: _buildBrandSection()),
-        // 第九个 Sliver：团购专区
-        SliverToBoxAdapter(child: _buildGroupBuy()),
-        // 添加商品展示区
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Text('精心为你推荐', style: TextStyle(fontWeight: FontWeight.bold)),
-          ),
-        ),
-        _buildProductGridView(context),
-      ],
+          );
+        },
+      ),
     );
   }
 
@@ -308,8 +433,7 @@ class HomePage extends StatelessWidget {
         children: [
           Expanded(
             child: InkWell(
-              onTap: () {
-              },
+              onTap: () {},
               borderRadius: BorderRadius.circular(8),
               child: Container(
                 height: 60,
@@ -635,8 +759,58 @@ class HomePage extends StatelessWidget {
             price: "¥${(index + 1) * 10}.00",
           );
         },
-        childCount: 6, // 商品总数
+        childCount: 10, // 商品总数
       ),
     );
+  }
+
+  // 计算持久化头部的高度
+  double calcPersistentHeaderExtent(double offset, {required bool isBody}) {
+    double value = ObserverUtils.calcPersistentHeaderExtent(
+      key: appBarKey,
+      offset: offset,
+    );
+    if (isBody) {
+      value += ObserverUtils.calcPersistentHeaderExtent(
+        key: tabBarKey,
+        offset: offset,
+      );
+    }
+    return value;
+  }
+
+  // 滚动到指定位置
+  void scrollTo({
+    required NestedScrollUtilPosition position,
+    required int index,
+    required BuildContext? sliverContext,
+    bool withAnimation = true,
+  }) {
+    bool isBody = NestedScrollUtilPosition.body == position;
+    if (withAnimation) {
+      nestedScrollUtil.animateTo(
+        nestedScrollViewKey: nestedScrollViewKey,
+        observerController: observerController,
+        position: position,
+        index: index,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeInOut,
+        sliverContext: sliverContext,
+        offset: (targetOffset) {
+          return calcPersistentHeaderExtent(targetOffset, isBody: isBody);
+        },
+      );
+    } else {
+      nestedScrollUtil.jumpTo(
+        nestedScrollViewKey: nestedScrollViewKey,
+        observerController: observerController,
+        position: position,
+        index: index,
+        sliverContext: sliverContext,
+        offset: (targetOffset) {
+          return calcPersistentHeaderExtent(targetOffset, isBody: isBody);
+        },
+      );
+    }
   }
 }

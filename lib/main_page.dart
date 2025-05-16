@@ -3,6 +3,7 @@ import 'package:mall/page/cart/cart_page.dart';
 import 'package:mall/page/category/category_page.dart';
 import 'package:mall/page/home/home_view.dart';
 import 'package:mall/page/profile/profile_page.dart';
+import 'package:mall/test/nested_scrollview_demo_page.dart';
 
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
@@ -17,7 +18,7 @@ class _MainPageState extends State<MainPage>
 
   final List<Widget> _pages = [
     const HomePage(),
-    const CategoryPage(),
+    const NestedScrollViewDemoPage(),
     const CartPage(),
     const ProfilePage(),
   ];
